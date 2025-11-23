@@ -5,6 +5,14 @@ from pathlib import Path
 import pygame
 
 
+try:
+    import tkinter as tk
+    from tkinter import filedialog
+except ImportError:
+    tk = None
+    filedialog = None
+
+
 WINDOW_WIDTH = 800
 WINDOW_HEIGHT = 600
 TARGET_Y = 480
@@ -41,14 +49,24 @@ class Arrow:
 
 
 class RhythmRound:
-    def __init__(self, song_path: Path, spawn_interval_ms: int = SPAWN_INTERVAL_MS):
-        pygame.init()
-        pygame.mixer.init()
-        self.screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+    def __init__(
+        self,
+        song_path: Path,
+        spawn_interval_ms: int = SPAWN_INTERVAL_MS,
+        screen: pygame.Surface | None = None,
+        clock: pygame.time.Clock | None = None,
+        font: pygame.font.Font | None = None,
+    ):
+        if not pygame.get_init():
+            pygame.init()
+        if not pygame.mixer.get_init():
+            pygame.mixer.init()
+
+        self.screen = screen or pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
         pygame.display.set_caption("Arrow Rhythm Round")
 
-        self.clock = pygame.time.Clock()
-        self.font = pygame.font.SysFont("arial", 24)
+        self.clock = clock or pygame.time.Clock()
+        self.font = font or pygame.font.SysFont("arial", 24)
 
         self.song_path = song_path
         self.spawn_interval_ms = spawn_interval_ms
@@ -151,12 +169,70 @@ class RhythmRound:
         self.start_music()
         while self.running and (pygame.mixer.music.get_busy() or self.arrows):
             self.tick()
-        pygame.quit()
+
+
+def pick_song_with_dialog() -> Path | None:
+    if tk is None or filedialog is None:
+        return None
+
+    root = tk.Tk()
+    root.withdraw()
+    root.update()
+    song_path = filedialog.askopenfilename(
+        title="Import MP3",
+        filetypes=[("MP3 files", "*.mp3"), ("All files", "*.*")],
+    )
+    root.destroy()
+    return Path(song_path) if song_path else None
+
+
+def show_import_screen(clock: pygame.time.Clock, font: pygame.font.Font) -> Path | None:
+    screen = pygame.display.get_surface()
+    button_rect = pygame.Rect((WINDOW_WIDTH - 240) // 2, (WINDOW_HEIGHT - 60) // 2, 240, 60)
+    info_text = [
+        "Import an MP3 to start a rhythm round",
+        "Click the button or press I",
+        "Press Esc to quit",
+    ]
+
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return None
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    return None
+                if event.key == pygame.K_i:
+                    selection = pick_song_with_dialog()
+                    if selection:
+                        return selection
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if button_rect.collidepoint(event.pos):
+                    selection = pick_song_with_dialog()
+                    if selection:
+                        return selection
+
+        screen.fill((18, 18, 26))
+        pygame.draw.rect(screen, (70, 140, 255), button_rect, border_radius=8)
+        pygame.draw.rect(screen, (200, 220, 255), button_rect, 2, border_radius=8)
+
+        button_text = font.render("Import MP3", True, (10, 10, 10))
+        screen.blit(
+            button_text,
+            button_text.get_rect(center=button_rect.center),
+        )
+
+        for idx, line in enumerate(info_text):
+            surface = font.render(line, True, (200, 200, 200))
+            screen.blit(surface, (WINDOW_WIDTH // 2 - surface.get_width() // 2, 160 + idx * 32))
+
+        pygame.display.flip()
+        clock.tick(60)
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Play a quick arrow rhythm round from an MP3 file.")
-    parser.add_argument("song", type=Path, help="Path to an MP3 file to play")
+    parser.add_argument("song", type=Path, nargs="?", help="Optional MP3 path. If omitted, an import dialog opens.")
     parser.add_argument(
         "--spawn-interval",
         type=int,
@@ -168,10 +244,33 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    if not args.song.exists():
-        raise SystemExit(f"Song file not found: {args.song}")
-    round_ = RhythmRound(song_path=args.song, spawn_interval_ms=args.spawn_interval)
+    if not pygame.get_init():
+        pygame.init()
+    if not pygame.mixer.get_init():
+        pygame.mixer.init()
+
+    screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+    pygame.display.set_caption("Arrow Rhythm Round")
+    clock = pygame.time.Clock()
+    font = pygame.font.SysFont("arial", 24)
+
+    song_path = args.song if args.song else show_import_screen(clock, font)
+    if song_path is None:
+        pygame.quit()
+        return
+    if not song_path.exists():
+        pygame.quit()
+        raise SystemExit(f"Song file not found: {song_path}")
+
+    round_ = RhythmRound(
+        song_path=song_path,
+        spawn_interval_ms=args.spawn_interval,
+        screen=screen,
+        clock=clock,
+        font=font,
+    )
     round_.run()
+    pygame.quit()
 
 
 if __name__ == "__main__":

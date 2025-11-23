@@ -13,16 +13,25 @@ A lightweight arrow-key rhythm round that plays alongside any MP3 you provide. U
 
 ## Usage
 
-Run the game by pointing it at an MP3 file:
+Run the game and import a song via the on-screen button:
+
+```bash
+python rhythm_game.py
+```
+
+- Click **Import MP3** (or press **I**) to open a file picker and choose your song.
+- Press **Esc** on the import screen to quit without starting a round.
+
+Controls during a round:
+
+- **Arrow keys:** Hit the matching arrow as it crosses the target outline near the bottom of the screen.
+- **Close window:** Quit the round.
+
+You can still launch directly from the command line if you prefer:
 
 ```bash
 python rhythm_game.py path/to/song.mp3
 ```
-
-Controls:
-
-- **Arrow keys:** Hit the matching arrow as it crosses the target outline near the bottom of the screen.
-- **Close window:** Quit the round.
 
 Use `--spawn-interval` to tune difficulty (lower values spawn arrows faster):
 
