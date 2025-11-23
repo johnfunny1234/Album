@@ -3,8 +3,6 @@ import importlib.util
 import math
 import random
 from pathlib import Path
-
-import numpy as np
 import pygame
 from pydub import AudioSegment
 
@@ -102,24 +100,25 @@ class RhythmRound:
         except Exception:
             return self._fallback_schedule()
 
-        mono = np.array(audio.get_array_of_samples())
-        if audio.channels > 1:
-            mono = mono.reshape((-1, audio.channels)).mean(axis=1)
+        samples = self._mono_samples(audio)
+        if not samples:
+            return self._fallback_schedule()
 
         window_samples = max(1, int(audio.frame_rate * (window_ms / 1000)))
         energies: list[float] = []
-        for start in range(0, len(mono), window_samples):
-            window = mono[start : start + window_samples]
-            if len(window) == 0:
+        for start in range(0, len(samples), window_samples):
+            window = samples[start : start + window_samples]
+            if not window:
                 break
-            energies.append(float(np.sqrt(np.mean(np.square(window)))))
+            mean_sq = sum(s * s for s in window) / len(window)
+            energies.append(math.sqrt(mean_sq))
 
         if not energies:
             return self._fallback_schedule()
 
-        median = float(np.median(energies))
-        mad = float(np.median(np.abs(energies - median))) or 1.0
-        threshold = median + 1.6 * mad
+        median_energy = self._median(energies)
+        mad = self._median([abs(e - median_energy) for e in energies]) or 1.0
+        threshold = median_energy + 1.6 * mad
 
         beats: list[int] = []
         last_beat_time = -min_interval_ms
@@ -132,6 +131,28 @@ class RhythmRound:
         if len(beats) < 8:
             return self._fallback_schedule()
         return beats
+
+    def _median(self, values: list[float]) -> float:
+        if not values:
+            return 0.0
+        sorted_vals = sorted(values)
+        mid = len(sorted_vals) // 2
+        if len(sorted_vals) % 2:
+            return float(sorted_vals[mid])
+        return float((sorted_vals[mid - 1] + sorted_vals[mid]) / 2)
+
+    def _mono_samples(self, audio: AudioSegment) -> list[float]:
+        raw = audio.get_array_of_samples()
+        if audio.channels == 1:
+            return [float(s) for s in raw]
+        stride = audio.channels
+        mono: list[float] = []
+        for i in range(0, len(raw), stride):
+            frame = raw[i : i + stride]
+            if len(frame) < stride:
+                break
+            mono.append(sum(float(s) for s in frame) / stride)
+        return mono
 
     def _fallback_schedule(self) -> list[int]:
         try:
@@ -215,13 +236,14 @@ class RhythmRound:
         return palette.get(direction, (200, 200, 255))
 
     def draw_background(self, delta_seconds: float) -> None:
-        base_color = np.array(WINDOW_BG, dtype=float)
+        base_color = WINDOW_BG
         if self.hit_flash_time > 0:
             self.hit_flash_time = max(0.0, self.hit_flash_time - delta_seconds)
             progress = self.hit_flash_time / HIT_FLASH_DURATION
-            flash = np.array(self.last_hit_color, dtype=float)
-            blend = base_color * (1 - progress) + flash * progress * 0.5
-            color = tuple(int(c) for c in np.clip(blend, 0, 255))
+            color = tuple(
+                max(0, min(255, int(base_color[i] * (1 - progress) + self.last_hit_color[i] * progress * 0.5)))
+                for i in range(3)
+            )
         else:
             wave = (math.sin(pygame.time.get_ticks() / 800) + 1) / 2
             color = tuple(int(c + 8 * wave) for c in base_color)
