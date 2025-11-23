@@ -1,14 +1,17 @@
 import argparse
+import importlib.util
+import math
 import random
 from pathlib import Path
 
+import numpy as np
 import pygame
+from pydub import AudioSegment
 
-
-try:
+if importlib.util.find_spec("tkinter"):
     import tkinter as tk
     from tkinter import filedialog
-except ImportError:
+else:
     tk = None
     filedialog = None
 
@@ -18,6 +21,8 @@ WINDOW_HEIGHT = 600
 TARGET_Y = 480
 ARROW_SPEED = 240  # pixels per second
 SPAWN_INTERVAL_MS = 800
+WINDOW_BG = (16, 18, 32)
+HIT_FLASH_DURATION = 0.25
 
 ARROW_POSITIONS = {
     "left": 200,
@@ -76,14 +81,71 @@ class RhythmRound:
         self.score = 0
         self.combo = 0
         self.misses = 0
+        self.start_time_ms = 0
+        self.beat_schedule_ms = self.generate_beat_schedule()
+        self.next_beat_index = 0
+        self.hit_flash_time = 0.0
+        self.last_hit_color = (120, 255, 200)
 
     def start_music(self) -> None:
         pygame.mixer.music.load(self.song_path.as_posix())
         pygame.mixer.music.play()
-        self.last_spawn = pygame.time.get_ticks()
+        now = pygame.time.get_ticks()
+        self.last_spawn = now
+        self.start_time_ms = now
+
+    def generate_beat_schedule(
+        self, window_ms: int = 120, min_interval_ms: int = 180
+    ) -> list[int]:
+        try:
+            audio = AudioSegment.from_file(self.song_path)
+        except Exception:
+            return self._fallback_schedule()
+
+        mono = np.array(audio.get_array_of_samples())
+        if audio.channels > 1:
+            mono = mono.reshape((-1, audio.channels)).mean(axis=1)
+
+        window_samples = max(1, int(audio.frame_rate * (window_ms / 1000)))
+        energies: list[float] = []
+        for start in range(0, len(mono), window_samples):
+            window = mono[start : start + window_samples]
+            if len(window) == 0:
+                break
+            energies.append(float(np.sqrt(np.mean(np.square(window)))))
+
+        if not energies:
+            return self._fallback_schedule()
+
+        median = float(np.median(energies))
+        mad = float(np.median(np.abs(energies - median))) or 1.0
+        threshold = median + 1.6 * mad
+
+        beats: list[int] = []
+        last_beat_time = -min_interval_ms
+        for idx, energy in enumerate(energies):
+            t_ms = int(idx * window_ms)
+            if energy >= threshold and (t_ms - last_beat_time) >= min_interval_ms:
+                beats.append(t_ms)
+                last_beat_time = t_ms
+
+        if len(beats) < 8:
+            return self._fallback_schedule()
+        return beats
+
+    def _fallback_schedule(self) -> list[int]:
+        try:
+            length_s = pygame.mixer.Sound(self.song_path.as_posix()).get_length()
+            duration_ms = int(length_s * 1000)
+        except Exception:
+            duration_ms = 180_000
+
+        interval = self.spawn_interval_ms
+        beats = [int(i * interval) for i in range(0, max(1, duration_ms // interval))]
+        return beats or [0]
 
     def spawn_arrow(self) -> None:
-        direction = random.choice(list(ARROW_POSITIONS.keys()))
+        direction = list(ARROW_POSITIONS.keys())[self.next_beat_index % 4]
         self.arrows.append(Arrow(direction=direction, y=-50))
 
     def handle_key(self, direction: str) -> None:
@@ -94,6 +156,8 @@ class RhythmRound:
                 arrow.hit = True
                 self.score += 100
                 self.combo += 1
+                self.hit_flash_time = HIT_FLASH_DURATION
+                self.last_hit_color = self.direction_color(direction)
                 return
         self.combo = 0
         self.misses += 1
@@ -131,7 +195,7 @@ class RhythmRound:
     def draw_targets(self) -> None:
         for direction in ARROW_POSITIONS:
             temp_arrow = Arrow(direction, TARGET_Y)
-            self.draw_arrow(temp_arrow, (80, 80, 80))
+            self.draw_arrow(temp_arrow, (70, 90, 120))
 
     def draw_stats(self) -> None:
         score_surface = self.font.render(f"Score: {self.score}", True, (255, 255, 255))
@@ -140,6 +204,28 @@ class RhythmRound:
         self.screen.blit(score_surface, (20, 20))
         self.screen.blit(combo_surface, (20, 50))
         self.screen.blit(miss_surface, (20, 80))
+
+    def direction_color(self, direction: str) -> tuple[int, int, int]:
+        palette = {
+            "left": (120, 200, 255),
+            "down": (255, 140, 200),
+            "up": (160, 255, 160),
+            "right": (255, 200, 120),
+        }
+        return palette.get(direction, (200, 200, 255))
+
+    def draw_background(self, delta_seconds: float) -> None:
+        base_color = np.array(WINDOW_BG, dtype=float)
+        if self.hit_flash_time > 0:
+            self.hit_flash_time = max(0.0, self.hit_flash_time - delta_seconds)
+            progress = self.hit_flash_time / HIT_FLASH_DURATION
+            flash = np.array(self.last_hit_color, dtype=float)
+            blend = base_color * (1 - progress) + flash * progress * 0.5
+            color = tuple(int(c) for c in np.clip(blend, 0, 255))
+        else:
+            wave = (math.sin(pygame.time.get_ticks() / 800) + 1) / 2
+            color = tuple(int(c + 8 * wave) for c in base_color)
+        self.screen.fill(color)
 
     def tick(self) -> None:
         delta_seconds = self.clock.tick(60) / 1000.0
@@ -150,18 +236,24 @@ class RhythmRound:
                 self.handle_key(ARROW_KEYS[event.key])
 
         now = pygame.time.get_ticks()
-        if now - self.last_spawn >= self.spawn_interval_ms:
+        while (
+            self.next_beat_index < len(self.beat_schedule_ms)
+            and now - self.start_time_ms >= self.beat_schedule_ms[self.next_beat_index]
+        ):
             self.spawn_arrow()
             self.last_spawn = now
+            self.next_beat_index += 1
 
         self.update_arrows(delta_seconds)
 
-        self.screen.fill((20, 20, 30))
+        self.draw_background(delta_seconds)
         self.draw_targets()
         for arrow in self.arrows:
-            color = (0, 200, 255) if not arrow.hit else (120, 255, 120)
+            color = self.direction_color(arrow.direction)
+            if arrow.hit:
+                color = tuple(min(255, c + 80) for c in color)
             self.draw_arrow(arrow, color)
-        pygame.draw.rect(self.screen, (40, 40, 60), (120, TARGET_Y - 48, 520, 96), 2)
+        pygame.draw.rect(self.screen, (70, 90, 130), (120, TARGET_Y - 48, 520, 96), 3, 6)
         self.draw_stats()
         pygame.display.flip()
 

@@ -1,6 +1,6 @@
 # Album Rhythm Round
 
-A lightweight arrow-key rhythm round that plays alongside any MP3 you provide. Use the left, right, up, and down arrows to hit the targets as the song plays.
+A lightweight arrow-key rhythm round that listens to any MP3 you provide, generates arrows on the song's stronger beats, and lights up the lane colors when you time your hits correctly.
 
 ## Setup
 
@@ -22,6 +22,12 @@ python rhythm_game.py
 - Click **Import MP3** (or press **I**) to open a file picker and choose your song. This is the simplest way to play.
 - Press **Esc** on the import screen to quit without starting a round.
 - If you provided a path on the command line that cannot be found, the main menu will show a red error message and let you pick a valid file instead of exiting.
+
+What happens under the hood:
+
+- When you pick a song, the game scans the audio (RMS energy peaks every ~120 ms) to find the loudest beats and uses those timestamps to schedule arrows.
+- If beat analysis fails for any reason, it falls back to steady spawns using the configured interval so you can still play.
+- Each lane has its own color, and successful hits cause a brief flash across the background so you can feel your timing.
 
 Controls during a round:
 
