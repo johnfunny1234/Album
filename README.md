@@ -19,9 +19,10 @@ Launch the game to reach the main menu, then import a song via the on-screen but
 python rhythm_game.py
 ```
 
-- Click **Import MP3** (or press **I**) to open a file picker and choose your song. This is the simplest way to play.
-- Press **Esc** on the import screen to quit without starting a round.
-- If you provided a path on the command line that cannot be found, the main menu will show a red error message and let you pick a valid file instead of exiting.
+1. Run the command above after installing the requirements (skipping this step can trigger ModuleNotFound errors).
+2. Click **Import MP3** (or press **I**) to open a file picker and choose your song. This is the simplest way to play.
+3. Press **Esc** on the import screen to quit without starting a round.
+4. If you provided a path on the command line that cannot be found, the main menu will show a red error message and let you pick a valid file instead of exiting.
 
 What happens under the hood:
 
@@ -45,6 +46,13 @@ Use `--spawn-interval` to tune difficulty (lower values spawn arrows faster):
 ```bash
 python rhythm_game.py path/to/song.mp3 --spawn-interval 700
 ```
+
+## Why this build is better
+
+- **Simple setup:** Only `pygame` and `pydub` are required—no `numpy` or heavy extras—so fresh Windows installs avoid missing-module errors.
+- **Menu-first flow:** The import button and on-screen guidance keep players in-app when a path is wrong instead of crashing back to the shell.
+- **Beat-aware arrows:** The game listens to each MP3, pulls energy peaks, and syncs arrows to those beats with a steady fallback if decoding fails.
+- **Readable visuals:** Color-coded lanes, background flashes on hits, and target outlines make timing feedback obvious.
 
 ## Building a Windows executable
 
